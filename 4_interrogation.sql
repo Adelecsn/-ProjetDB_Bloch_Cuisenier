@@ -1,0 +1,290 @@
+
+-- 1) PROJECTIONS/SÉLECTIONS (tri, DISTINCT, LIKE, IN, BETWEEN)
+
+-- tri ville
+SELECT DISTINCT VILLE
+FROM AEROPORT
+ORDER BY VILLE;
+
+-- like et tri  pour email
+SELECT ID_PASS, NOM_PASS, PRENOM_PASS, EMAIL
+FROM PASSAGER
+WHERE EMAIL LIKE '%.fr'
+ORDER BY NOM_PASS, PRENOM_PASS;
+
+-- in et between pour réservations
+SELECT CODE_RES, CLASSE_VOYAGE, TARIF, STATUT_RES
+FROM RESERVATION
+WHERE CLASSE_VOYAGE IN ('Économie','Affaires')
+  AND TARIF BETWEEN 95 AND 120
+ORDER BY TARIF DESC, CODE_RES;
+
+-- between pour les créneaux horaires
+SELECT NUM_VOL, DATE_DEPART_PREVU, HEURE_DEPART_PREVU, CODE_AEROPORT
+FROM VOL
+WHERE DATE_DEPART_PREVU = '2025-10-20'
+  AND HEURE_DEPART_PREVU BETWEEN '10:00:00' AND '19:00:00'
+ORDER BY HEURE_DEPART_PREVU;
+
+-- like masque préfixe pour grade pilote 
+SELECT ID_PIL, NOM_PIL, PRENOM_PIL, GRADE_PIL
+FROM PILOTE
+WHERE GRADE_PIL LIKE 'Pilote%';
+
+-- in pour emplacement aéroport 
+SELECT CODE_AEROPORT, NOM_AEROPORT, PAYS
+FROM AEROPORT
+WHERE PAYS IN ('France','Allemagne','Royaume-Uni')
+ORDER BY PAYS, NOM_AEROPORT;
+
+
+-- 2) AGRÉGATIONS + GROUP BY + HAVING
+   
+
+-- group by + tri pour nombre de vols par jour
+SELECT DATE_DEPART_PREVU AS JOUR, COUNT(*) AS NB_VOLS
+FROM VOL
+WHERE STATUT_VOL = 'Prévu'
+GROUP BY DATE_DEPART_PREVU
+ORDER BY NB_VOLS DESC, JOUR;
+
+-- group by pour réservations par classe 
+SELECT CLASSE_VOYAGE,
+       ROUND(AVG(TARIF),2) AS TARIF_MOY,
+       MIN(TARIF) AS TARIF_MIN,
+       MAX(TARIF) AS TARIF_MAX,
+       COUNT(*)  AS NB_RES
+FROM RESERVATION
+GROUP BY CLASSE_VOYAGE
+ORDER BY TARIF_MOY DESC;
+
+-- capacité compagnie
+SELECT c.NOM_COMPAGNIE,
+       SUM(a.CAPACITE) AS CAPACITE_TOTALE,
+       COUNT(*)        AS NB_AVIONS
+FROM AVION a
+JOIN COMPAGNIE c ON c.ID_COMPAGNIE = a.ID_COMPAGNIE
+GROUP BY c.NOM_COMPAGNIE
+ORDER BY CAPACITE_TOTALE DESC;
+
+-- having > 1000 montant total payé
+SELECT MODE_PAIEMENT, ROUND(SUM(MONTANT_PAIEMENT),2) AS TOTAL
+FROM PAIEMENT
+GROUP BY MODE_PAIEMENT
+HAVING SUM(MONTANT_PAIEMENT) > 1000
+ORDER BY TOTAL DESC;
+
+-- poids moyen bagages par type
+SELECT TYPE_BAGAGE,
+       ROUND(AVG(POIDS),2) AS POIDS_MOY,
+       COUNT(*) AS NB_PIECES
+FROM BAGAGE
+GROUP BY TYPE_BAGAGE
+HAVING COUNT(*) >= 3
+ORDER BY POIDS_MOY DESC;
+
+-- les recettes totales
+SELECT r.STATUT_RES,
+       ROUND(SUM(r.TARIF),2)                            AS TOTAL_RES,
+       ROUND(COALESCE(SUM(sa.PRIX_SERVICE),0),2)        AS TOTAL_SERV,
+       ROUND(SUM(r.TARIF) + COALESCE(SUM(sa.PRIX_SERVICE),0),2) AS TOTAL_GLOBAL
+FROM RESERVATION r
+LEFT JOIN SERVICE_ADDITIONNEL sa ON sa.CODE_RES = r.CODE_RES
+GROUP BY r.STATUT_RES
+ORDER BY TOTAL_GLOBAL DESC;
+
+
+-- 3) les jointures
+
+
+-- vols, aéroports, compagnie, 3 jointures
+SELECT v.NUM_VOL,
+       ad.NOM_AEROPORT AS AEROPORT_DEPART,
+       aa.NOM_AEROPORT AS AEROPORT_ARRIVEE,
+       c.NOM_COMPAGNIE
+FROM VOL v
+JOIN AEROPORT ad ON ad.CODE_AEROPORT   = v.CODE_AEROPORT
+JOIN AEROPORT aa ON aa.CODE_AEROPORT   = v.CODE_AEROPORT_1
+JOIN COMPAGNIE c ON c.ID_COMPAGNIE     = v.ID_COMPAGNIE
+ORDER BY v.NUM_VOL;
+
+-- passagers, vols, heure, jointure interne
+SELECT p.NUM_VOL, v.HEURE_DEPART_PREVU, COUNT(*) AS NB_PASSAGERS
+FROM PASSAGER p
+JOIN VOL v ON v.NUM_VOL = p.NUM_VOL
+GROUP BY p.NUM_VOL, v.HEURE_DEPART_PREVU
+ORDER BY v.HEURE_DEPART_PREVU;
+
+-- reservation, vol, jointure gauche avec LIEE_A 
+SELECT r.CODE_RES, r.STATUT_RES, la.NUM_VOL
+FROM RESERVATION r
+LEFT JOIN LIEE_A la ON la.CODE_RES = r.CODE_RES
+ORDER BY r.CODE_RES;
+
+-- vol et escale, pistes
+SELECT v.NUM_VOL, v.DATE_DEPART_PREVU, v.HEURE_DEPART_PREVU,
+       vea.CODE_AEROPORT AS ESCALE_AEROPORT, vea.ID_PISTE
+FROM VOL v
+LEFT JOIN VOL_ESCALE_AEROPORT vea ON vea.NUM_VOL = v.NUM_VOL
+ORDER BY v.NUM_VOL, vea.ID_PISTE;
+
+-- montant payé par réservation (billet -> paiement) avec réservations sans paiement
+SELECT r.CODE_RES,
+       COALESCE(SUM(pai.MONTANT_PAIEMENT),0) AS MONTANT_TOTAL
+FROM RESERVATION r
+LEFT JOIN BILLET b     ON b.CODE_RES = r.CODE_RES
+LEFT JOIN PAIEMENT pai ON pai.ID_BILLET = b.ID_BILLET
+GROUP BY r.CODE_RES
+ORDER BY MONTANT_TOTAL DESC, r.CODE_RES;
+
+
+-- 4) requêtes imbriquées
+
+
+-- vols avec au moins 1 réservation exists
+SELECT v.NUM_VOL
+FROM VOL v
+WHERE EXISTS (
+  SELECT 1 FROM LIEE_A la WHERE la.NUM_VOL = v.NUM_VOL
+)
+ORDER BY v.NUM_VOL;
+
+-- réservations sans billet not exists
+SELECT r.CODE_RES, r.STATUT_RES
+FROM RESERVATION r
+WHERE NOT EXISTS (
+  SELECT 1 FROM BILLET b WHERE b.CODE_RES = r.CODE_RES
+);
+
+-- passagers vol compagnies européennes sous-requête
+SELECT p.ID_PASS, p.NOM_PASS, p.PRENOM_PASS, p.NUM_VOL
+FROM PASSAGER p
+WHERE p.NUM_VOL IN (
+  SELECT v.NUM_VOL
+  FROM VOL v
+  JOIN COMPAGNIE c ON c.ID_COMPAGNIE = v.ID_COMPAGNIE
+  WHERE c.PAYS_COMPAGNIE IN ('France','Allemagne','États-Unis','Émirats Arabes Unis','États-Unis','Belgique','Italie','Espagne','Royaume-Uni','Suisse')
+);
+
+-- avions capacité est ≥ à tous les A220/A320 all
+SELECT NUM_AV, MODELE_AV, CAPACITE
+FROM AVION
+WHERE CAPACITE >= ALL (
+  SELECT CAPACITE FROM AVION WHERE MODELE_AV IN ('A220-300','A320neo')
+);
+
+-- pilotes qui encadrent quelqu’un exists et ceux qui ne sont encadrés par personne is null
+SELECT p.ID_PIL, p.NOM_PIL, p.PRENOM_PIL, p.GRADE_PIL
+FROM PILOTE p
+WHERE EXISTS (SELECT 1 FROM PILOTE c WHERE c.ID_PIL_ENCADRE = p.ID_PIL)
+   OR p.ID_PIL_ENCADRE IS NULL
+ORDER BY p.ID_PIL;
+
+-- vols dont la durée prévue est > à n'importe qu'elle (any ou some) escale de leur itinéraire.
+SELECT v.NUM_VOL
+FROM VOL v
+WHERE TIMESTAMPDIFF(MINUTE,
+        TIMESTAMP(v.DATE_DEPART_PREVU, v.HEURE_DEPART_PREVU),
+        TIMESTAMP(v.DATE_ARRIVEE_PREVU, v.HEURE_ARRIVEE_PREVU)
+      ) > ANY (
+        SELECT TIMESTAMPDIFF(MINUTE, vea.HEURE_ARRIVEE_ESCALE, vea.HEURE_DEPART_ESCALE)
+        FROM VOL_ESCALE_AEROPORT vea
+        WHERE vea.NUM_VOL = v.NUM_VOL
+      );
+
+
+-- 5) analyses opérationnelles correspond à quelques exemples des conclusions que peut tirer le responsable logistique. 
+
+
+-- optimisation rotation avions : temps de demi-tour (turnaround) entre 2 vols consécutifs d’un même avion (flag < 90 minutes)
+WITH vols AS (
+  SELECT v.NUM_VOL, v.NUM_AV,
+         TIMESTAMP(v.DATE_DEPART_PREVU, v.HEURE_DEPART_PREVU)  AS TS_DEP,
+         TIMESTAMP(v.DATE_ARRIVEE_PREVU, v.HEURE_ARRIVEE_PREVU) AS TS_ARR
+  FROM VOL v
+),
+chainage AS (
+  SELECT v1.NUM_AV, v1.NUM_VOL AS VOL_PRECEDENT, v2.NUM_VOL AS VOL_SUIVANT,
+         TIMESTAMPDIFF(MINUTE, v1.TS_ARR, v2.TS_DEP) AS MINUTES_TURNAROUND
+  FROM vols v1
+  JOIN vols v2 ON v2.NUM_AV = v1.NUM_AV
+              AND v2.TS_DEP > v1.TS_ARR
+  -- plus proche suivant
+  AND NOT EXISTS (
+    SELECT 1 FROM vols v3
+    WHERE v3.NUM_AV = v1.NUM_AV
+      AND v3.TS_DEP > v1.TS_ARR
+      AND v3.TS_DEP < v2.TS_DEP
+  )
+)
+SELECT *
+FROM chainage
+WHERE MINUTES_TURNAROUND < 90
+ORDER BY NUM_AV, MINUTES_TURNAROUND;
+
+-- ajustement tarifaire face à des coûts exceptionnels (coûts maintenance 30 derniers jours) / (recettes billets 30 derniers jours)
+-- NB : exemple indicatif ; recettes estimées via BILLET/PAIEMENT
+WITH couts AS (
+  SELECT a.ID_COMPAGNIE, SUM(m.COUT) AS COUT_30J
+  FROM MAINTENANCE m
+  JOIN AVION a ON a.NUM_AV = m.NUM_AV
+  WHERE m.DATE_MAINT BETWEEN DATE_SUB('2025-10-17', INTERVAL 30 DAY) AND '2025-10-17'
+  GROUP BY a.ID_COMPAGNIE
+),
+recettes AS (
+  SELECT v.ID_COMPAGNIE, SUM(p.MONTANT_PAIEMENT) AS RECETTES_30J
+  FROM PAIEMENT p
+  JOIN BILLET b ON b.ID_BILLET = p.ID_BILLET
+  JOIN LIEE_A la ON la.CODE_RES = b.CODE_RES
+  JOIN VOL v ON v.NUM_VOL = la.NUM_VOL
+  WHERE p.DATE_PAIEMENT BETWEEN DATE_SUB('2025-10-17', INTERVAL 30 DAY) AND '2025-10-17'
+  GROUP BY v.ID_COMPAGNIE
+)
+SELECT c.NOM_COMPAGNIE,
+       COALESCE(couts.COUT_30J,0) AS COUT_30J,
+       COALESCE(recettes.RECETTES_30J,0) AS RECETTES_30J,
+       CASE
+         WHEN COALESCE(recettes.RECETTES_30J,0) = 0 THEN NULL
+         ELSE ROUND(100 * couts.COUT_30J / recettes.RECETTES_30J,2)
+       END AS SURCHARGE_PCT_RECOMMANDEE
+FROM COMPAGNIE c
+LEFT JOIN couts ON couts.ID_COMPAGNIE = c.ID_COMPAGNIE
+LEFT JOIN recettes ON recettes.ID_COMPAGNIE = c.ID_COMPAGNIE
+ORDER BY SURCHARGE_PCT_RECOMMANDEE DESC;
+
+-- pics d’affluence : passagers par créneau horaire et par jour
+SELECT v.DATE_DEPART_PREVU AS JOUR,
+       CONCAT(LPAD(FLOOR(HOUR(v.HEURE_DEPART_PREVU)/2)*2,2,'0'),':00-',
+              LPAD(FLOOR(HOUR(v.HEURE_DEPART_PREVU)/2)*2+2,2,'0'),':00') AS CRENEAU_2H,
+       COUNT(p.ID_PASS) AS NB_PAX
+FROM VOL v
+LEFT JOIN PASSAGER p ON p.NUM_VOL = v.NUM_VOL
+GROUP BY JOUR, CRENEAU_2H
+ORDER BY JOUR, CRENEAU_2H;
+
+
+
+
+-- 6) Bonus de calculs utiles pouvant servir à d'autres conclusions de la part de notre chargé opérationnel
+
+-- vue des vols avec durée en minutes
+CREATE OR REPLACE VIEW V_VOL_DUREE AS
+SELECT v.*,
+       TIMESTAMPDIFF(MINUTE,
+         TIMESTAMP(v.DATE_DEPART_PREVU, v.HEURE_DEPART_PREVU),
+         TIMESTAMP(v.DATE_ARRIVEE_PREVU, v.HEURE_ARRIVEE_PREVU)
+       ) AS DUREE_MIN
+FROM VOL v;
+
+-- vue charge par vol (réservations vs capacité)
+CREATE OR REPLACE VIEW V_CHARGE_VOL AS
+SELECT v.NUM_VOL, c.NOM_COMPAGNIE, a.CAPACITE, COALESCE(r.NB_RES,0) AS NB_RES,
+       ROUND(100*COALESCE(r.NB_RES,0)/a.CAPACITE,2) AS TAUX_REMP_PCT
+FROM VOL v
+JOIN AVION a ON a.NUM_AV = v.NUM_AV
+JOIN COMPAGNIE c ON c.ID_COMPAGNIE = v.ID_COMPAGNIE
+LEFT JOIN (
+  SELECT NUM_VOL, COUNT(*) AS NB_RES
+  FROM LIEE_A
+  GROUP BY NUM_VOL
+) r ON r.NUM_VOL = v.NUM_VOL;
